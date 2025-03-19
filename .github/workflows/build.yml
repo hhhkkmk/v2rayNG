@@ -28,33 +28,25 @@ jobs:
         path: ${{ github.workspace }}/libs
         key: libtun2socks-${{ runner.os }}-${{ hashFiles('.git/modules/badvpn/HEAD') }}-${{ hashFiles('.git/modules/libancillary/HEAD') }}
 
-    - name: Setup Android NDK
-      uses: nttld/setup-ndk@v1
-      id: setup-ndk
-      # Same version as https://gitlab.com/fdroid/fdroiddata/metadata/com.v2ray.ang.yml
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
       with:
-        ndk-version: r27
-        add-to-path: true
-        link-to-sdk: true
-        local-cache: true
+        log-accepted-android-sdk-licenses: false
+        cmdline-tools-version: '12266719'
+        packages: 'platforms;android-35 build-tools;35.0.0 platform-tools'
 
-    - name: Restore Android Symlinks
+    - name: Install NDK
       run: |
-        directory="${{ steps.setup-ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin"
-        find "$directory" -type l | while read link; do
-            current_target=$(readlink "$link")
-            new_target="$directory/$(basename "$current_target")"
-            ln -sf "$new_target" "$link"
-            echo "Changed $(basename "$link") from $current_target to $new_target"
-        done
+        echo "y" | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
+          --channel=3 \
+          --install "ndk;29.0.13113456"
+        echo "NDK_HOME=$ANDROID_HOME/ndk/29.0.13113456" >> $GITHUB_ENV
 
     - name: Build libtun2socks
       if: steps.cache-libtun2socks-restore.outputs.cache-hit != 'true'
       run: |
         bash compile-tun2socks.sh
         tar -xvzf libtun2socks.so.tgz
-      env:
-        NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
     - name: Save libtun2socks
       if: steps.cache-libtun2socks-restore.outputs.cache-hit != 'true'
@@ -100,8 +92,6 @@ jobs:
       if: steps.cache-libhysteria2-restore.outputs.cache-hit != 'true'
       run: |
         bash libhysteria2.sh
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
 
     - name: Save libhysteria2
       if: steps.cache-libhysteria2-restore.outputs.cache-hit != 'true'
@@ -120,25 +110,14 @@ jobs:
         distribution: 'temurin'
         java-version: '21'
 
-    - name: Setup Android environment
-      uses: android-actions/setup-android@v3
-
-    - name: Decode Keystore
-      uses: timheuer/base64-to-file@v1
-      id: android_keystore
-      with:
-        fileName: "android_keystore.jks"
-        encodedString: ${{ secrets.APP_KEYSTORE_BASE64 }}
-
     - name: Build APK
       run: |
         cd ${{ github.workspace }}/V2rayNG
+        echo "sdk.dir=${ANDROID_HOME}" > local.properties
         chmod 755 gradlew
         ./gradlew licenseFdroidReleaseReport
-        ./gradlew assembleRelease -Pandroid.injected.signing.store.file=${{ steps.android_keystore.outputs.filePath }} -Pandroid.injected.signing.store.password=${{ secrets.APP_KEYSTORE_PASSWORD }} -Pandroid.injected.signing.key.alias=${{ secrets.APP_KEYSTORE_ALIAS }} -Pandroid.injected.signing.key.password=${{ secrets.APP_KEY_PASSWORD }}
-      env:
-        ANDROID_NDK_HOME: ${{ steps.setup-ndk.outputs.ndk-path }}
-
+        ./gradlew assembleRelease
+    
     - name: Upload arm64-v8a APK
       uses: actions/upload-artifact@v4
       if: ${{  success() }}
